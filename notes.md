@@ -49,7 +49,7 @@ model_dict = model.load_state_dict(
 ```
 This issue is about the cpu/gpu thingies
 
-- [ ] _TODO: Use your GPU to increase the iteration speed_
+- [x] _TODO: Use your GPU to increase the iteration speed_
 
 Now the project is _ready_\* to run
 
@@ -62,6 +62,41 @@ Output:
 pr_auc : 0.8935741368889635
 roc_auc : 0.8886666666666667
 ```
+
+## Third error
+
+The way the files are named doesn’t take Windows into account.
+
+
+In `main.py`
+```py
+f = open(path + "config_{}.txt".format(datetime.datetime.now()), 'w')
+```
+This will result in a filename: `2025-09-06 05:26:18.772724`, which contains `:` which is illegal on Windows filenames.
+
+So I changed this line above in `main.py` to:
+```py
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+f = open(path + f"config_{timestamp}.txt", "w") # config_2025-09-06_05-26-18.txt
+```
+
+This solved it
+
+## Fourth Error
+
+`cuda` IS HARD CODED EVERYWHERE. So I gotta use my gpu. I ran these commands:
+
+```bash
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+It's 2GB download. It took a while but now there are no `cuda` errors.
+
+Ok so now `python main.py` runs fine, but it's `1.22s/it`, I think this is because of my GPU. Although it's not getting utilized, neither the CPU.
+
+My apps has crashed lol. Gotta run this on Google colab.
+
 
 ---
 

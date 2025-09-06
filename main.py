@@ -22,7 +22,8 @@ import sys
 def save_config(save_path):
     path = save_path+'/'
     os.makedirs(path,exist_ok=True)
-    f = open(path + "config_{}.txt".format(datetime.datetime.now()), 'w')
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    f = open(path + f"config_{timestamp}.txt", "w")
     for key in vars(args).keys():
         f.write('{}: {}'.format(key,vars(args)[key]))
         f.write('\n')
@@ -46,9 +47,11 @@ if __name__ == '__main__':
     args=option.parse_args()
     random.seed(2025)
     np.random.seed(2025)
-    torch.cuda.manual_seed(2025)
-    device = torch.device('cuda')
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(2025)
+    else:
+        torch.manual_seed(2025)  # fall back safely for CPU
 
     # DO NOT SHUFFLE, shuffling is handled by the Dataset class and not the DataLoader
     train_loader = DataLoader(Dataset(args, test_mode=False),
@@ -67,7 +70,9 @@ if __name__ == '__main__':
 
     if args.pretrained_ckpt is not None:
         model_ckpt = torch.load(args.pretrained_ckpt)
-        model.load_state_dict(model_ckpt)
+        model.load_state_dict(
+            torch.load(args.pretrained_ckpt, map_location=device)
+        )
         print("pretrained loaded")
 
     model = model.to(device)
