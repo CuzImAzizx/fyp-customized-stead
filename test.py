@@ -18,8 +18,12 @@ import sys
 # MODEL_EXTENSION = '.pkl'
 
 MODEL_LOCATION = 'ckpt/'
-MODEL_NAME = 'modelfinal'
+MODEL_NAME = 'efficientnet_testfinal'
 MODEL_EXTENSION = '.pkl'
+all_labels = []
+all_scores = []
+
+
 
 def test(dataloader, model, args, device = 'cuda', name = "training", main = False):
     model.to(device)
@@ -31,17 +35,24 @@ def test(dataloader, model, args, device = 'cuda', name = "training", main = Fal
         feats = []
         #time_start = time.time()
         for _, inputs in tqdm(enumerate(dataloader)):
-            labels += inputs[1].cpu().detach().tolist()
+            labels_batch = inputs[1].to(device)
             input = inputs[0].to(device)
             scores, feat = model(input)
-            scores = torch.nn.Sigmoid()(scores).squeeze()
+        
+            scores = torch.sigmoid(scores).squeeze()
+        
+            # Save ground truth and predictions
+            all_labels.extend(labels_batch.cpu().numpy())
+            all_scores.extend(scores.cpu().numpy())
+        
+            # For UMAP visualization
             pred_ = scores.cpu().detach().tolist()
             feats += feat.cpu().detach().tolist()
             pred += pred_
         #print("Time taken to process " + str(len(dataloader)) + " inputs: " + str(time.time() - time_start))
-        fpr, tpr, threshold = roc_curve(labels, pred)
+        fpr, tpr, threshold = roc_curve(all_labels, all_scores)
         roc_auc = auc(fpr, tpr)
-        precision, recall, th = precision_recall_curve(labels, pred)
+        precision, recall, th = precision_recall_curve(all_labels, all_scores)
         pr_auc = auc(recall, precision)
         print('pr_auc : ' + str(pr_auc))
         print('roc_auc : ' + str(roc_auc))
@@ -83,7 +94,7 @@ if __name__ == '__main__':
             ff_mult = 1,
             dims = (32, 32),
             depths = (1, 1),
-            block_types = ('r', 'a')   # <-- must match training config!
+            block_types = ('e', 'a')   # <-- must match training config!
         )
     else:
         print("Model architecture not recognized")
@@ -98,3 +109,38 @@ if __name__ == '__main__':
     model.load_state_dict(state_dict, strict=False) # We may need to remove strict=False
 
     auc = test(test_loader, model, args, device, name = MODEL_NAME, main = True)
+
+
+    import numpy as np
+    from sklearn.metrics import (
+        accuracy_score, precision_score, recall_score,
+        confusion_matrix, roc_auc_score
+    )
+    
+    y_true = np.array(all_labels)
+    y_scores = np.array(all_scores)
+    
+    # Threshold
+    threshold = 0.5
+    y_pred = (y_scores >= threshold).astype(int)
+
+    # Confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = cm.ravel()
+
+    # Metrics
+    accuracy = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)   # same as sensitivity
+    specificity = tn / (tn + fp)
+
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall (Sensitivity): {recall:.4f}")
+    print(f"Specificity: {specificity:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
+
+    failure_indices = np.where(y_true != y_pred)[0]
+    print("Failure case indices (first 10):", failure_indices[:10])
+

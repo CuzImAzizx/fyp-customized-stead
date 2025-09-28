@@ -68,7 +68,7 @@ if __name__ == '__main__':
             ff_mult = 1,
             dims = (32, 32),
             depths = (1, 1),          # you can try (2,1) to give Res stage more capacity
-            block_types = ('r', 'a')   # <— use ResNet bottleneck stage instead of ConvBlock
+            block_types = ('e', 'a')   # <— EfficientNet + Attention
         )
     else:
         print("Model architecture not recognized")
