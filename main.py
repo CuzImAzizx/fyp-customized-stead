@@ -60,12 +60,20 @@ if __name__ == '__main__':
                              batch_size=args.batch_size)
 
     if args.model_arch == 'base':
-        model = Model(dropout = args.dropout_rate, attn_dropout=args.attn_dropout_rate)
-    elif args.model_arch == 'fast' or args.model_arch == 'tiny':
-        model = Model(dropout = args.dropout_rate, attn_dropout=args.attn_dropout_rate, ff_mult = 1, dims = (32,32), depths = (1,1))
+        model = Model(dropout=args.dropout_rate, attn_dropout=args.attn_dropout_rate)
+    elif args.model_arch in ['fast', 'tiny']:
+        model = Model(
+            dropout = args.dropout_rate,
+            attn_dropout = args.attn_dropout_rate,
+            ff_mult = 1,
+            dims = (32, 32),
+            depths = (1, 1),          # you can try (2,1) to give Res stage more capacity
+            block_types = ('r', 'a')   # <— use ResNet bottleneck stage instead of ConvBlock
+        )
     else:
         print("Model architecture not recognized")
         sys.exit()
+
     model.apply(init_weights)
 
     if args.pretrained_ckpt is not None:

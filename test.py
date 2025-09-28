@@ -13,8 +13,12 @@ import numpy as np
 #import time
 import sys
 
-MODEL_LOCATION = 'saved_models/'
-MODEL_NAME = '888tiny'
+# MODEL_LOCATION = 'saved_models/'
+# MODEL_NAME = '888tiny'
+# MODEL_EXTENSION = '.pkl'
+
+MODEL_LOCATION = 'ckpt/'
+MODEL_NAME = 'modelfinal'
 MODEL_EXTENSION = '.pkl'
 
 def test(dataloader, model, args, device = 'cuda', name = "training", main = False):
@@ -61,21 +65,36 @@ def test(dataloader, model, args, device = 'cuda', name = "training", main = Fal
 
 
 if __name__ == '__main__':
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(2025)
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        torch.manual_seed(2025)
+        print("Using CPU - no CUDA detected")
+
     args = option.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")   
     if args.model_arch == 'base':
-        model = Model()
-    elif args.model_arch == 'fast' or args.model_arch == 'tiny':
-        model = Model(ff_mult = 1, dims = (32,32), depths = (1,1))
+        model = Model(dropout=args.dropout_rate, attn_dropout=args.attn_dropout_rate)
+    elif args.model_arch in ['fast', 'tiny']:
+        model = Model(
+            dropout = args.dropout_rate,
+            attn_dropout = args.attn_dropout_rate,
+            ff_mult = 1,
+            dims = (32, 32),
+            depths = (1, 1),
+            block_types = ('r', 'a')   # <-- must match training config!
+        )
     else:
-        print('Model architecture not recognized')
+        print("Model architecture not recognized")
         sys.exit()
+
     test_loader = DataLoader(Dataset(args, test_mode=True),
                               batch_size=args.batch_size, shuffle=False,
                               num_workers=0, pin_memory=False)
     model = model.to(device)
     summary(model, (1, 192, 16, 10, 10))
-    model_dict = model.load_state_dict(
-    torch.load(MODEL_LOCATION + MODEL_NAME + MODEL_EXTENSION, map_location=device)
-    )
+    state_dict = torch.load(MODEL_LOCATION + MODEL_NAME + MODEL_EXTENSION, map_location=device)
+    model.load_state_dict(state_dict, strict=False) # We may need to remove strict=False
+
     auc = test(test_loader, model, args, device, name = MODEL_NAME, main = True)

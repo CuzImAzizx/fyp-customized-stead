@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from utils import FeedForward, DECOUPLED
 from performer_pytorch import Performer
+import torch.nn.functional as F
 
 class AttnBlock(nn.Module):
     def __init__(self, dim, depth, dropout, attn_dropout, heads = 16, ff_mult = 2):
@@ -44,6 +45,55 @@ class ConvBlock(nn.Module):
         x = x + self.conv(self.norm1(x))
         x = x + self.ff(self.norm2(x))
         return x
+    
+class ResBottleBlock(nn.Module):
+    """
+    ResNet-50 style bottleneck applied per-frame (2D), plus optional cheap temporal depthwise conv.
+    Expects channels-last input: (B, T, H, W, C) and returns same shape.
+    """
+    def __init__(self, dim, temporal=True, dropout=0.0):
+        super().__init__()
+        width = max(1, dim // 4)  # bottleneck width
+
+        # Frame-wise spatial bottleneck (on each frame independently)
+        self.conv1 = nn.Conv2d(dim, width, kernel_size=1, bias=False)
+        self.bn1   = nn.BatchNorm2d(width)
+        self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, bias=False)
+        self.bn2   = nn.BatchNorm2d(width)
+        self.conv3 = nn.Conv2d(width, dim, kernel_size=1, bias=False)
+        self.bn3   = nn.BatchNorm2d(dim)
+        self.relu  = nn.ReLU(inplace=True)
+        self.drop  = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # Optional temporal mixing: depthwise 3x1x1 over T
+        self.temporal = temporal
+        if temporal:
+            self.tdw   = nn.Conv3d(dim, dim, kernel_size=(3,1,1), padding=(1,0,0), groups=dim, bias=False)
+            self.tbn   = nn.BatchNorm3d(dim)
+
+    def forward(self, x):  # x: (B, T, H, W, C)
+        B, T, H, W, C = x.shape
+
+        # frame-wise 2D bottleneck
+        y = x.permute(0,1,4,2,3).reshape(B*T, C, H, W)  # (B*T, C, H, W)
+        identity = y
+        y = self.relu(self.bn1(self.conv1(y)))
+        y = self.relu(self.bn2(self.conv2(y)))
+        y = self.bn3(self.conv3(y))
+        y = self.relu(y + identity)
+        y = self.drop(y)
+        y = y.view(B, T, C, H, W).permute(0,1,3,4,2)     # back to (B, T, H, W, C)
+
+        # optional temporal depthwise conv
+        if self.temporal:
+            z = y.permute(0,4,1,2,3)                     # (B, C, T, H, W)
+            z = self.tdw(z)
+            z = self.tbn(z)
+            z = F.relu(z, inplace=True)
+            z = z.permute(0,2,3,4,1)                     # (B, T, H, W, C)
+            y = y + z                                    # residual add
+
+        return y
 
 # main class
 
@@ -73,16 +123,20 @@ class Model(nn.Module):
             if block_types == "c":
                 for _ in range(depth):
                     self.stages.append(
-                        ConvBlock(
-                            dim = stage_dim,
-                            ff_mult=ff_mult,
-                            dropout = dropout,
-                        )
+                        ConvBlock(dim=stage_dim, ff_mult=ff_mult, dropout=dropout)
                     )
             elif block_types == "a":
                 for _ in range(depth):
-                    self.stages.append(AttnBlock(stage_dim, 1, dropout, attn_dropout, ff_mult=ff_mult))
-                
+                    self.stages.append(
+                        AttnBlock(stage_dim, 1, dropout, attn_dropout, ff_mult=ff_mult)
+                    )
+            elif block_types == "r":   # NEW: ResNet-style bottleneck
+                for _ in range(depth):
+                    self.stages.append(
+                        ResBottleBlock(dim=stage_dim, temporal=True, dropout=dropout)
+                    )
+            else:
+                raise ValueError(f"Unknown block type: {block_types}")                
             if not is_last:
                 self.stages.append(
                     nn.Sequential(
