@@ -175,6 +175,88 @@ class TAMBlock(nn.Module):
         y = self.sigmoid(y).view(B, C, 1, 1, 1)
         x_mod = x_reshaped * y
         return x_mod.permute(0, 2, 3, 4, 1)
+    
+    
+class ResNetTAMBlock(nn.Module):
+    """
+    Composed block: ResBottleBlock -> BatchNorm3d -> ReLU -> TAMBlock.
+    Keeps shapes consistent: internal blocks expect [B,T,H,W,C].
+    Use this when you want "ResNet -> BatchNorm -> ReLU -> TAM".
+    """
+    def __init__(self, dim, temporal=True, dropout=0.0):
+        super().__init__()
+        # use your existing ResBottleBlock (frame-wise spatial bottleneck + temporal depthwise conv)
+        self.res = ResBottleBlock(dim=dim, temporal=temporal, dropout=dropout)
+        # BatchNorm3d operates on shape [B, C, T, H, W]
+        self.bn3d = nn.BatchNorm3d(dim)
+        self.relu = nn.ReLU(inplace=True)
+        # use existing TAMBlock (expects [B, T, H, W, C])
+        self.tam = TAMBlock(dim)
+
+    def forward(self, x):  # x: [B, T, H, W, C]
+        # 1) ResBottleBlock (returns [B, T, H, W, C])
+        x = self.res(x)
+
+        # 2) BatchNorm3d requires [B, C, T, H, W]
+        x_bn = x.permute(0, 4, 1, 2, 3).contiguous()  # -> [B, C, T, H, W]
+        x_bn = self.bn3d(x_bn)
+        x_bn = self.relu(x_bn)
+
+        # back to [B, T, H, W, C]
+        x = x_bn.permute(0, 2, 3, 4, 1).contiguous()
+
+        # 3) TAMBlock (applies temporal adaptive gating, returns [B, T, H, W, C])
+        x = self.tam(x)
+
+        return x
+    
+    
+class TransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads=4, dropout=0.1, ff_mult=4):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, batch_first=True)
+        self.norm2 = nn.LayerNorm(dim)
+        self.ff = nn.Sequential(
+            nn.Linear(dim, ff_mult * dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(ff_mult * dim, dim)
+        )
+
+    def forward(self, x):
+        # x: [B, T, H, W, C]
+        B, T, H, W, C = x.shape
+        x_ = x.reshape(B, T * H * W, C)  # flatten space into tokens
+        y = self.norm1(x_)
+        attn_out, _ = self.attn(y, y, y)
+        x_ = x_ + attn_out
+        y = self.norm2(x_)
+        y = self.ff(y)
+        out = x_ + y
+        out = out.reshape(B, T, H, W, C)
+        return out
+
+# ---- ResNet + Transformer composite ----
+class ResNetTransformerBlock(nn.Module):
+    """
+    ResNet -> BatchNorm3d -> ReLU -> Transformer
+    """
+    def __init__(self, dim, temporal=True, dropout=0.0, num_heads=4, ff_mult=4):
+        super().__init__()
+        self.res = ResBottleBlock(dim=dim, temporal=temporal, dropout=dropout)
+        self.bn3d = nn.BatchNorm3d(dim)
+        self.relu = nn.ReLU(inplace=True)
+        self.transformer = TransformerBlock(dim=dim, num_heads=num_heads, dropout=dropout, ff_mult=ff_mult)
+
+    def forward(self, x):  # [B, T, H, W, C]
+        x = self.res(x)
+        x_bn = x.permute(0, 4, 1, 2, 3).contiguous()
+        x_bn = self.bn3d(x_bn)
+        x_bn = self.relu(x_bn)
+        x = x_bn.permute(0, 2, 3, 4, 1).contiguous()
+        x = self.transformer(x)
+        return x
 
 # ---------------------------
 # Model
@@ -215,6 +297,16 @@ class Model(nn.Module):
                 print("TTTTTTTTTTTTTTTTTTTTTTTTTTT TAM Block")
                 for _ in range(depth):
                     self.stages.append(TAMBlock(stage_dim))
+            elif block_type == "rt":
+                # ResNet -> BatchNorm -> ReLU -> TAM
+                print("RRRRRRRRRRRR ResNet -> BatchNorm -> ReLU -> TAM")
+                for _ in range(depth):
+                    self.stages.append(ResNetTAMBlock(stage_dim, temporal=True, dropout=dropout))
+            elif block_type == "rtr":
+                print("RRRRRRRRRRRR ResNet -> BatchNorm -> ReLU -> Transformer")
+                for _ in range(depth):
+                    self.stages.append(ResNetTransformerBlock(stage_dim, temporal=True, dropout=dropout))
+                    
             else:
                 raise ValueError(f"Unknown block type: {block_type}")
 
