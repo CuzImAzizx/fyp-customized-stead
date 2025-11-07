@@ -66,8 +66,10 @@ if __name__ == '__main__':
             dropout = args.dropout_rate,
             attn_dropout = args.attn_dropout_rate,
             ff_mult = 1,
+            
+            # Update these
             dims = (32, 32),
-            depths = (1, 1),          # you can try (2,1) to give Res stage more capacity
+            depths = (1, 1), 
             block_types = ('e', 'a')   # <— EfficientNet + Attention
         )
     else:

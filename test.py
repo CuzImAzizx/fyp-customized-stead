@@ -17,9 +17,11 @@ import sys
 # MODEL_NAME = '888tiny'
 # MODEL_EXTENSION = '.pkl'
 
+
 MODEL_LOCATION = 'ckpt/'
-MODEL_NAME = 'efficientnet_testfinal'
+MODEL_NAME = 'block_r_depths_1-1_dims_32-32' # Update this one
 MODEL_EXTENSION = '.pkl'
+
 all_labels = []
 all_scores = []
 
@@ -92,9 +94,11 @@ if __name__ == '__main__':
             dropout = args.dropout_rate,
             attn_dropout = args.attn_dropout_rate,
             ff_mult = 1,
+            
+            # These must match the model config
             dims = (32, 32),
             depths = (1, 1),
-            block_types = ('e', 'a')   # <-- must match training config!
+            block_types = ('e', 'a')
         )
     else:
         print("Model architecture not recognized")
