@@ -18,7 +18,7 @@ import sys
 # MODEL_EXTENSION = '.pkl'
 
 
-MODEL_LOCATION = 'ckpt/'
+MODEL_LOCATION = 'ckpt/0.0002_16_tiny/'
 MODEL_NAME = 'block_r_depths_1-1_dims_32-32' # Update this one
 MODEL_EXTENSION = '.pkl'
 

@@ -106,23 +106,57 @@ if __name__ == '__main__':
             cycle_decay = 0.95,
         )
 
-    test_info = {"epoch": [], "test_AUC": [], "test_PR":[]}
+    best_pr_auc = 0
+    patience = 7
+    patience_counter = 0
 
-    for step in tqdm(
-            range(0, args.max_epoch),
-            total=args.max_epoch,
-            dynamic_ncols=True
-    ):
+    train_losses = []
+    val_auc_list = []
+    val_pr_list = []
 
-        cost = train(train_loader, model, optimizer, scheduler, device, step)
-        scheduler.step(step + 1)
+    for step in tqdm(range(0, args.max_epoch), total=args.max_epoch, dynamic_ncols=True):
+
+        train_loss = train(train_loader, model, optimizer, scheduler, device, step)
+        train_losses.append(train_loss)
 
         auc, pr_auc = test(test_loader, model, args, device)
+        val_auc_list.append(auc)
+        val_pr_list.append(pr_auc)
 
-        test_info["epoch"].append(step)
-        test_info["test_AUC"].append(auc)
-        test_info["test_PR"].append(pr_auc)
-        torch.save(model.state_dict(), savepath + '/' + args.model_name + '{}-x3d.pkl'.format(step))
-        save_best_record(test_info, os.path.join(savepath + "/", '{}-step.txt'.format(step)))
+        # EARLY STOPPING + SAVE BEST
+        if pr_auc > best_pr_auc:
+            best_pr_auc = pr_auc
+            patience_counter = 0
+            torch.save(model.state_dict(), savepath + '/BEST_MODEL.pkl')
+            print(f"Saved new best model at epoch {step} | PR-AUC = {pr_auc:.4f}")
+        else:
+            patience_counter += 1
+            print(f"No improvement ({patience_counter}/{patience})")
 
-    torch.save(model.state_dict(), './ckpt/' + args.model_name + 'final.pkl')
+        if patience_counter >= patience:
+            print("Early stopping activated. Training stopped.")
+            break
+
+        scheduler.step(step + 1)
+
+    # SAVE LEARNING CURVES
+    import matplotlib.pyplot as plt
+
+    plt.figure()
+    plt.plot(train_losses)
+    plt.title("Training Loss Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.savefig(savepath + "/train_loss_curve.png")
+
+    plt.figure()
+    plt.plot(val_auc_list, label="ROC-AUC")
+    plt.plot(val_pr_list, label="PR-AUC")
+    plt.title("Validation Curves")
+    plt.xlabel("Epoch")
+    plt.ylabel("Score")
+    plt.legend()
+    plt.savefig(savepath + "/validation_curves.png")
+
+    print("Training Finished. Best model saved at:")
+    print(savepath + '/BEST_MODEL.pkl')
