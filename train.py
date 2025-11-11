@@ -28,55 +28,16 @@ class TripletLoss(nn.Module):
         a_d_min = torch.max(torch.zeros(bs // 2).cuda(), a_d_min)
         return torch.mean(n_d_max) + torch.mean(a_d_min)
 
-class Loss(nn.Module):
-    def __init__(self, alpha=0.01, beta=0.1, use_supcon=False):
+class Loss(torch.nn.Module): # Gipity, I have updated this, one of the tasks was using multi loss functions. Our instructor gave us this class. It's not part of the original code or the paper. 
+    def __init__(self):
         super(Loss, self).__init__()
-        self.criterion = nn.BCEWithLogitsLoss()
-        self.triplet = TripletLoss()  # Make sure this supports hard mining
-        self.alpha = alpha
-        self.beta = beta
-        self.use_supcon = use_supcon
+        self.criterion = torch.nn.BCEWithLogitsLoss()
+        self.triplet = TripletLoss()
 
-    def supervised_contrastive_loss(self, features, labels, temperature=0.07):
-        device = features.device
-        labels = labels.contiguous().view(-1, 1)
-        mask = torch.eq(labels, labels.T).float().to(device)
-
-        features = F.normalize(features, dim=1)
-        anchor_dot_contrast = torch.div(torch.matmul(features, features.T), temperature)
-
-        # For stability
-        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
-        logits = anchor_dot_contrast - logits_max.detach()
-
-        # Mask out self-contrast
-        logits_mask = torch.ones_like(mask) - torch.eye(mask.shape[0]).to(device)
-        mask = mask * logits_mask
-
-        exp_logits = torch.exp(logits) * logits_mask
-        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-12)
-
-        mean_log_prob_pos = (mask * log_prob).sum(1) / (mask.sum(1) + 1e-12)
-        loss = -mean_log_prob_pos.mean()
-        return loss
-
-    def forward(self, scores, feats, targets):
-        """
-        scores: [B, 1] raw logits
-        feats: [B, C] feature embeddings
-        targets: [B] binary labels (0 or 1)
-        """
-        loss_ce = self.criterion(scores, targets.float())
-
-        loss_triplet = self.triplet(feats, targets)  # You may need anchors/positives/negatives
-        loss = loss_ce + self.alpha * loss_triplet
-
-        if self.use_supcon:
-            loss_supcon = self.supervised_contrastive_loss(feats, targets)
-            loss += self.beta * loss_supcon
-            return loss, loss_ce, loss_triplet, loss_supcon
-
-        return loss, loss_ce, loss_triplet
+    def forward(self, scores, feats, targets, alpha = 0.01):
+        loss_ce = self.criterion(scores, targets)
+        loss_triplet = self.triplet(feats)
+        return loss_ce, alpha * loss_triplet
 
 def train(loader, model, optimizer, scheduler, device, epoch):
 
