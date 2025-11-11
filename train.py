@@ -107,4 +107,4 @@ def train(loader, model, optimizer, scheduler, device, epoch):
         pr_auc = auc(recall, precision)
         print('train_pr_auc : ' + str(pr_auc))
         print('train_roc_auc : ' + str(roc_auc))
-        return  loss.item()
+        return float(loss.detach().cpu())
