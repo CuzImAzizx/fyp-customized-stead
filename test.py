@@ -19,13 +19,11 @@ import sys
 
 
 MODEL_LOCATION = 'ckpt/0.0002_16_tiny/'
-MODEL_NAME = 'block_r_depths_1-1_dims_32-32' # Update this one
+MODEL_NAME = 'BEST_MODEL' # Update this one
 MODEL_EXTENSION = '.pkl'
 
 all_labels = []
 all_scores = []
-
-
 
 def test(dataloader, model, args, device = 'cuda', name = "training", main = False):
     model.to(device)
@@ -98,7 +96,7 @@ if __name__ == '__main__':
             # These must match the model config
             dims = (32, 32),
             depths = (1, 1),
-            block_types = ('e', 'a')
+            block_types = ('t', 'a')
         )
     else:
         print("Model architecture not recognized")

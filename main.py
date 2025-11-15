@@ -68,9 +68,9 @@ if __name__ == '__main__':
             ff_mult = 1,
             
             # Update these
-            dims = (32, 32),
+            dims = (32, 64),
             depths = (1, 1), 
-            block_types = ('e', 'a')   # <— EfficientNet + Attention
+            block_types = ('t', 'a')   # <— EfficientNet + Attention
         )
     else:
         print("Model architecture not recognized")
@@ -107,56 +107,90 @@ if __name__ == '__main__':
         )
 
     best_pr_auc = 0
-    patience = 7
+    patience = 10
     patience_counter = 0
 
     train_losses = []
-    val_auc_list = []
-    val_pr_list = []
+    val_losses = []
+    train_roc_list = []
+    val_roc_list = []
+
+    criterion = torch.nn.BCEWithLogitsLoss()
 
     for step in tqdm(range(0, args.max_epoch), total=args.max_epoch, dynamic_ncols=True):
 
-        train_loss = train(train_loader, model, optimizer, scheduler, device, step)
+        # ---- TRAIN ----
+        train_loss, train_roc_auc = train(train_loader, model, optimizer, scheduler, device, step)
         train_losses.append(train_loss)
+        train_roc_list.append(train_roc_auc)
 
-        auc, pr_auc = test(test_loader, model, args, device)
-        val_auc_list.append(auc)
-        val_pr_list.append(pr_auc)
+        # ---- VALIDATION ----
+        model.eval()
+        all_labels, all_scores = [], []
+        val_loss = 0.0
+        with torch.no_grad():
+            for inputs, labels in test_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                scores, feats = model(inputs)
+                val_loss += criterion(scores.squeeze(), labels).item()
+                all_labels.extend(labels.cpu().numpy())
+                all_scores.extend(torch.sigmoid(scores).cpu().numpy())
 
-        # EARLY STOPPING + SAVE BEST
-        if pr_auc > best_pr_auc:
-            best_pr_auc = pr_auc
+        val_loss /= len(test_loader)
+        val_losses.append(val_loss)
+
+        # Compute validation ROC-AUC
+        from sklearn.metrics import roc_auc_score
+        val_roc_auc = roc_auc_score(all_labels, all_scores)
+        val_roc_list.append(val_roc_auc)
+
+        # ---- LOGGING ----
+        print(f"Epoch [{step+1}/{args.max_epoch}] | "
+              f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+              f"Train ROC-AUC: {train_roc_auc:.4f} | Val ROC-AUC: {val_roc_auc:.4f}")
+
+        # ---- EARLY STOPPING ----
+        if val_roc_auc > best_pr_auc:
+            best_pr_auc = val_roc_auc
             patience_counter = 0
             torch.save(model.state_dict(), savepath + '/BEST_MODEL.pkl')
-            print(f"Saved new best model at epoch {step} | PR-AUC = {pr_auc:.4f}")
+            print(f"New best model saved | Val ROC-AUC = {val_roc_auc:.4f}")
         else:
             patience_counter += 1
             print(f"No improvement ({patience_counter}/{patience})")
 
         if patience_counter >= patience:
-            print("Early stopping activated. Training stopped.")
+            print("========= Early stopping activated. Training stopped. =========")
             break
 
         scheduler.step(step + 1)
 
-    # SAVE LEARNING CURVES
+    # ---- PLOTTING ----
     import matplotlib.pyplot as plt
 
+    # LOSS CURVE
     plt.figure()
-    plt.plot(train_losses)
-    plt.title("Training Loss Curve")
+    plt.plot(train_losses, label="Train Loss")
+    plt.plot(val_losses, label="Validation Loss")
+    plt.title("Loss Curve")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.savefig(savepath + "/train_loss_curve.png")
-
-    plt.figure()
-    plt.plot(val_auc_list, label="ROC-AUC")
-    plt.plot(val_pr_list, label="PR-AUC")
-    plt.title("Validation Curves")
-    plt.xlabel("Epoch")
-    plt.ylabel("Score")
     plt.legend()
-    plt.savefig(savepath + "/validation_curves.png")
+    plt.grid(True)
+    plt.savefig(savepath + "/loss_curve.png", bbox_inches='tight')
 
-    print("Training Finished. Best model saved at:")
-    print(savepath + '/BEST_MODEL.pkl')
+    # ROC-AUC CURVE
+    plt.figure()
+    plt.plot(train_roc_list, label="Train ROC-AUC")
+    plt.plot(val_roc_list, label="Validation ROC-AUC")
+    plt.title("ROC-AUC Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("ROC-AUC")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(savepath + "/roc_auc_curve.png", bbox_inches='tight')
+
+    print("========= Training finished =========")
+    print("Best model saved at:", savepath + '/BEST_MODEL.pkl')
+    print("Charts saved in:", savepath)
+
